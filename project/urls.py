@@ -23,5 +23,5 @@ app_name = "project"
 urlpatterns = [
     path("index/", index, name = "index"),
     path("show/", show, name = "show"),
-    path("getIntroduce/", getIntroduce, name = "getIntroduce")
+    path("getIntroduce/", getIntroduce, name = "getIntroduce"),
 ]

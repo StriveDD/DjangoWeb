@@ -1,11 +1,12 @@
 import time
 from typing import List
 import requests
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 import openai
 import requests.adapters
+from project import models
 
 
 contents = {
@@ -17,8 +18,19 @@ contents = {
 
 urlCnt: List[str] = []     # 保存搜集到了图片 url
 
+Commodity = models.Commodity    # 数据库对象
+
+start_time = None
+
 # Create your views here.
 def index(request):
+    global start_time
+    current_time = time.time()
+    if start_time is None: start_time = time.time()
+    elif current_time - start_time > 604800:
+        # 七天后清空数据库
+        Commodity.objects.all().delete()
+        start_time = current_time
     return render(request, "HTML/index.html")
 
 
@@ -28,10 +40,17 @@ def show(request):
     product_name = request.POST.get("product_name")
     consult = request.POST.get("consult")
     urlCnt.clear()
-    product_name_waterfly = contents[product_name]
-    product_name_Amazon = product_name.split(' ')
-    urlCnt += searchImgInAmazon(product_name_Amazon)
-    urlCnt += searchImgInWaterfly(product_name_waterfly)
+
+    # 先去数据库查找
+    databaseContents = Commodity.objects.filter(commodityName = product_name)
+    if len(databaseContents) > 0:
+        for cnt in databaseContents:
+            urlCnt.append(cnt.imgUrl)
+    else:
+        product_name_waterfly = contents[product_name]
+        product_name_Amazon = product_name.split(' ')
+        urlCnt += searchImgInWaterfly(product_name_waterfly, product_name)
+        urlCnt += searchImgInAmazon(product_name_Amazon, product_name)
     return render(request, "HTML/index.html", context = {"valid": True, "api_key": api_key, "product_name": product_name, "amount": len(urlCnt), "consult": consult})
 
 
@@ -46,7 +65,7 @@ def getIntroduce(request):
 
 
 # 根据目标 url 获取图片
-def downLoadPictureInAmazon(url):
+def downLoadPictureInAmazon(url, product_name):
     ans = []    # 用来存在满足条件的图片
 
     # 随机设置 ua
@@ -68,7 +87,7 @@ def downLoadPictureInAmazon(url):
 
     # 设置 verify = False 取消 SSL 认证
     try:
-        response = requests.get(url = url, timeout = 120, headers = headers, verify = False)
+        response = requests.get(url = url, timeout = 30, headers = headers, verify = False)
         response.encoding = response.apparent_encoding
         soup = BeautifulSoup(response.text, "html.parser")
     except requests.exceptions:
@@ -81,13 +100,14 @@ def downLoadPictureInAmazon(url):
             start, end = target.find("src="), target.find("srcset")
             targetImgUrl = target[start + 5:end - 2]
             ans.append(targetImgUrl)
+            Commodity.objects.create(commodityName = product_name, imgUrl = targetImgUrl)   # 把数据添加到数据库中
             if len(ans) > 100: break
         response.close()
     return ans
 
 
 # 根据目标 url 获取图片
-def downLoadPictureInWaterfly(url):
+def downLoadPictureInWaterfly(url, product_name):
     ans = []    # 用来存在满足条件的图片
 
     ua = UserAgent(verify_ssl = False)
@@ -112,12 +132,13 @@ def downLoadPictureInWaterfly(url):
         targetUrl = "https:" + target[start + 5:end - 2]
         if ans.count(targetUrl) > 0: continue
         ans.append(targetUrl)
+        Commodity.objects.create(commodityName = product_name, imgUrl = targetUrl)
     response.close()
     return ans
 
 
 # 利用 GPT 去 Amazon 搜索图片
-def searchImgInAmazon(cnt):
+def searchImgInAmazon(cnt, product_name):
     # 去 Amazon 搜索
     urlFront = "https://www.amazon.com/s?k="
     urlRear = "&page=1&__mk_zh_CN=%E4%BA%9A%E9%A9%AC%E9%80%8A%E7%BD%91%E7%AB%99&ref=sr_pg_1"
@@ -133,7 +154,7 @@ def searchImgInAmazon(cnt):
         urlFront, urlRear = url[:ll + 5], url[lr:right + 10]
         url = urlFront + str(page) + urlRear + str(page)
         page += 1
-        currentImg = downLoadPictureInAmazon(url)
+        currentImg = downLoadPictureInAmazon(url, product_name)
         time.sleep(5)
         if len(currentImg) < 20: break
         allImageUrl += currentImg
@@ -141,8 +162,8 @@ def searchImgInAmazon(cnt):
 
 
 # 利用 GPT 去 Waterfly 搜索图片
-def searchImgInWaterfly(name):
-    allImageUrl = downLoadPictureInWaterfly(name)
+def searchImgInWaterfly(name, product_name):
+    allImageUrl = downLoadPictureInWaterfly(name, product_name)
     return allImageUrl
 
 
@@ -162,7 +183,7 @@ def analyseImg(cnt, open_api_key, consult):
         )
         message += "第" + str(count) + "条介绍：\n"
         message += "图片地址：%s\n" % url
-        message += "详细介绍: \n"
+        message += "产品详细介绍: \n"
         message += "%s\n\n" % completion.choices[0].message["content"].strip()
         count += 1
     return message
