@@ -47,9 +47,9 @@ def show(request):
         for cnt in databaseContents:
             urlCnt.append(cnt.imgUrl)
     else:
-        product_name_waterfly = contents[product_name]
+        product_name_waterfly = contents.get(product_name)
         product_name_Amazon = product_name.split(' ')
-        urlCnt += searchImgInWaterfly(product_name_waterfly, product_name)
+        if product_name_waterfly is not None: urlCnt += searchImgInWaterfly(product_name_waterfly, product_name)
         urlCnt += searchImgInAmazon(product_name_Amazon, product_name)
     return render(request, "HTML/index.html", context = {"valid": True, "api_key": api_key, "product_name": product_name, "amount": len(urlCnt), "consult": consult})
 
