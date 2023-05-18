@@ -38,11 +38,11 @@
                     {% csrf_token %}
                     <label>
                         <input type = "hidden" name = "api_key" value = "{{ api_key }}">
-                        <input type = "hidden" name = "produce_name" value = "{{ product_name }}">
+                        <input type = "hidden" name = "product_name" value = "{{ product_name }}">
                         <input type = "hidden" name = "consult" value = "{{ consult }}">
                     </label>
                     <div id = "inputInform" style="margin-top: 40px;width: 50%;margin-left: 30%;border: 0px solid red;">
-                        <span>寻找找到了{{ amount }}张图片，需要分析多少张图片？</span>
+                        <span>找到了{{ product_name }}的{{ amount }}张图片，需要分析多少张图片？</span>
                         <span>
                             <label>
                                 <input type = "text" name = "amount" style="width: 120px;height: 30px;">

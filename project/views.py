@@ -1,3 +1,4 @@
+import threading
 import time
 from typing import List
 import requests
@@ -7,7 +8,10 @@ from fake_useragent import UserAgent
 import openai
 import requests.adapters
 from project import models
+import os
 
+os.environ["http_proxy"] = "http://localhost:7890"
+os.environ["https_proxy"] = "http://localhost:7890"
 
 contents = {
     "sling pack": "https://waterflyshop.com/collections/sling-packs",
@@ -16,6 +20,7 @@ contents = {
     "accessory": "https://waterflyshop.com/collections/accessories/Waterproof-Socks"
 }
 
+urlCntLock = threading.Lock()
 urlCnt: List[str] = []     # 保存搜集到了图片 url
 
 Commodity = models.Commodity    # 数据库对象
@@ -24,13 +29,6 @@ start_time = None
 
 # Create your views here.
 def index(request):
-    global start_time
-    current_time = time.time()
-    if start_time is None: start_time = time.time()
-    elif current_time - start_time > 604800:
-        # 七天后清空数据库
-        Commodity.objects.all().delete()
-        start_time = current_time
     return render(request, "HTML/index.html")
 
 
@@ -39,28 +37,43 @@ def show(request):
     api_key = request.POST.get("api_key")
     product_name = request.POST.get("product_name")
     consult = request.POST.get("consult")
+    urlCntLock.acquire()  # 获取线程锁
     urlCnt.clear()
+    urlCntLock.release()  # 释放线程锁
 
     # 先去数据库查找
     databaseContents = Commodity.objects.filter(commodityName = product_name)
     if len(databaseContents) > 0:
+        urlCntLock.acquire()  # 获取线程锁
         for cnt in databaseContents:
             urlCnt.append(cnt.imgUrl)
+        urlCntLock.release()  # 释放线程锁
     else:
+        urlCntLock.acquire()  # 获取线程锁
         product_name_waterfly = contents.get(product_name)
         product_name_Amazon = product_name.split(' ')
         if product_name_waterfly is not None: urlCnt += searchImgInWaterfly(product_name_waterfly, product_name)
         urlCnt += searchImgInAmazon(product_name_Amazon, product_name)
+        urlCntLock.release()  # 释放线程锁
+    print("search urlCnt length: %d" % len(urlCnt))
     return render(request, "HTML/index.html", context = {"valid": True, "api_key": api_key, "product_name": product_name, "amount": len(urlCnt), "consult": consult})
 
 
 def getIntroduce(request):
+    global urlCnt
     api_key = request.POST.get("api_key")
     product_name = request.POST.get("product_name")
     amount = int(request.POST.get("amount"))
     consult = request.POST.get("consult")
+    urlCntLock.acquire()  # 获取线程锁
     needAnalyseImg = urlCnt[:amount]
+    urlCntLock.release()  # 释放线程锁
+    print("urlCnt length: %d" % len(urlCnt))
+    print("amount: %d" % amount)
+    print("needAnalyseImg: %s" % needAnalyseImg)
+    urlCntLock.acquire()  # 获取线程锁
     outputCnt = analyseImg(needAnalyseImg, api_key, consult)
+    urlCntLock.release()  # 释放线程锁
     return render(request, "HTML/index.html", context = {"valid": True, "search": True, "api_key": api_key, "product_name": product_name, "amount": len(urlCnt), "outputCnt": outputCnt, "consult": consult})
 
 
@@ -155,7 +168,7 @@ def searchImgInAmazon(cnt, product_name):
         url = urlFront + str(page) + urlRear + str(page)
         page += 1
         currentImg = downLoadPictureInAmazon(url, product_name)
-        time.sleep(5)
+        time.sleep(2)
         if len(currentImg) < 20: break
         allImageUrl += currentImg
     return allImageUrl
